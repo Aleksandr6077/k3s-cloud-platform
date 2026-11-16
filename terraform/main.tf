@@ -361,7 +361,7 @@ resource "yandex_lb_network_load_balancer" "k3s_ingress_nlb" {
     port        = 80
     target_port = 30360
     internal_address_spec {
-      subnet_id  = yandex_vpc_subnet.k3s_workers_subnets["ru-central1-a"].id
+      subnet_id  = yandex_vpc_subnet.k3s_workers_subnets[local.unique_zones[0]].id
       ip_version = "ipv4"
     }
   }
@@ -371,7 +371,7 @@ resource "yandex_lb_network_load_balancer" "k3s_ingress_nlb" {
     port        = 443
     target_port = 31181
     internal_address_spec {
-      subnet_id  = yandex_vpc_subnet.k3s_workers_subnets["ru-central1-a"].id
+      subnet_id  = yandex_vpc_subnet.k3s_workers_subnets[local.unique_zones[0]].id
       ip_version = "ipv4"
     }
   }
