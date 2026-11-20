@@ -13,7 +13,7 @@ spec:
       helm:
         valueFiles:
           - $values/k8s/platform/monitoring/values.yaml
-    - repoURL: 'https://github.com/Aleksandr6077/k3s-infra-test'
+    - repoURL: 'https://github.com/Aleksandr6077/k3s-cloud-platform'
       targetRevision: HEAD
       ref: values
   destination:

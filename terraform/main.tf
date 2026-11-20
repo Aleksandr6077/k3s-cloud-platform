@@ -291,7 +291,7 @@ resource "yandex_compute_instance" "bastion" {
   platform_id = "standard-v3"
 
   labels = {
-    repo       = "k3s-infra-test"
+    repo       = "k3s-cloud-platform"
     role       = "bastion"
     is_bastion = "true"
   }
