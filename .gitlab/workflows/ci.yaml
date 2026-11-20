@@ -88,9 +88,9 @@ kube_score:
   script:
     - |
       if [ "$CI_JOB_STATUS" == "success" ]; then
-        TEXT="✅ <b>Пайплайн k3s-infra-test успешно пройден!</b>%0A<b>Коммит:</b> ${CI_COMMIT_MESSAGE}%0A<b>Автор:</b> ${GITLAB_USER_NAME}"
+        TEXT="✅ <b>Пайплайн k3s-cloud-platform успешно пройден!</b>%0A<b>Коммит:</b> ${CI_COMMIT_MESSAGE}%0A<b>Автор:</b> ${GITLAB_USER_NAME}"
       else
-        TEXT="❌ <b>Пайплайн k3s-infra-test ЗАВАЛЕН!</b>%0AПроверьте логи сборки безопасности.%0A<b>Автор коммита:</b> ${GITLAB_USER_NAME}"
+        TEXT="❌ <b>Пайплайн k3s-cloud-platform ЗАВАЛЕН!</b>%0AПроверьте логи сборки безопасности.%0A<b>Автор коммита:</b> ${GITLAB_USER_NAME}"
       fi
       curl -sf -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
         -d chat_id="${TELEGRAM_CHAT_ID}" \

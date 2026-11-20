@@ -115,7 +115,7 @@ jobs:
           curl -sf -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
             -d chat_id="${TELEGRAM_CHAT_ID}" \
             -d parse_mode="HTML" \
-            -d text="✅ <b>Пайплайн k3s-infra-test успешно пройден!</b>%0A<b>Коммит:</b> ${COMMIT_MSG}%0A<b>Автор:</b> ${{ github.actor }}" \
+            -d text="✅ <b>Пайплайн k3s-cloud-platform успешно пройден!</b>%0A<b>Коммит:</b> ${COMMIT_MSG}%0A<b>Автор:</b> ${{ github.actor }}" \
             > /dev/null
 
       - name: Telegram Notification (Failure)
@@ -127,5 +127,5 @@ jobs:
           curl -sf -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
             -d chat_id="${TELEGRAM_CHAT_ID}" \
             -d parse_mode="HTML" \
-            -d text="❌ <b>Пайплайн k3s-infra-test ЗАВАЛЕН!</b>%0AПроверьте логи сборки безопасности.%0A<b>Автор коммита:</b> ${{ github.actor }}" \
+            -d text="❌ <b>Пайплайн k3s-cloud-platform ЗАВАЛЕН!</b>%0AПроверьте логи сборки безопасности.%0A<b>Автор коммита:</b> ${{ github.actor }}" \
             > /dev/null
