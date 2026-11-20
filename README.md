@@ -101,7 +101,7 @@ K3s использует встроенный в бинарник движок `
 ## 📁 Структура проекта
 
 ```text
-k3s-infra-test/
+k3s-cloud-platform/
 ├── .github/
 │   └── workflows/
 │       └── ci.yaml                  # CI/CD (GitHub Actions)
