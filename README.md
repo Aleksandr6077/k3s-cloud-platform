@@ -1,17 +1,96 @@
-## 🏗️ K3s: Деплой, GitOps, Мониторинг и Логирование🏗️
+## ☸️ K3s: Деплой, GitOps, Мониторинг и Логирование ☸️
 
 Проектирование, автоматизация развертывания (IaC OpenTofu/Ansible) и обеспечение высокой доступности распределенного кластера K3s в облачной инфраструктуре Yandex Cloud с интегрированным стеком мониторинга и логирования.
 
-[![Changelog](https://shields.io)](./CHANGELOG.md)
-[![License](https://shields.io)](./LICENSE)
-[![SLO](./docs/slo.md)](./docs/slo.md)
-[![Failure Modes](./docs/failure-modes.md)](./docs/failure-modes.md)
-[![Architecture](./docs/architecture.md)](./docs/architecture.md)
-[![tech-debt](./docs/tech-debt.md)](./docs/tech-debt.md)
-[![multi-zonal-limitation](./docs/multi-zonal-limitation.md)](./docs/multi-zonal-limitation.md)
+[![Changelog](https://img.shields.io/badge/View-blue?label=Changelog)](./CHANGELOG.md)
+[![License](https://img.shields.io/badge/MIT-green?label=License)](./LICENSE)
+[![SLO](https://img.shields.io/badge/View-orange?label=SLO)](./docs/slo.md)
+[![Failure Modes](https://img.shields.io/badge/View-red?label=Failure%20Modes)](./docs/failure-modes.md)
+[![Production Gaps](https://img.shields.io/badge/View-critical?label=Production%20Gaps)](./docs/production-gaps.md)
+[![Tech Debt](https://img.shields.io/badge/View-yellow?label=Tech%20Debt)](./docs/tech-debt.md)
+[![Audit Backlog](https://img.shields.io/badge/View-inactive?label=Audit%20Backlog)](./docs/audit-backlog.md)
+[![Multi-Zonal](https://img.shields.io/badge/View-blueviolet?label=Multi--Zonal)](./docs/multi-zonal-limitation.md)
 
 ---
 
+## 🏗️ Архитектура облачного стенда K3s 🏗️
+
+## 🗺️ Общая схема 🗺️
+
+```mermaid
+flowchart TB
+    Admin["💻 Разработчик / Браузер"]
+
+    subgraph YC["☁️ Yandex Cloud VPC (k3s-network)"]
+
+        subgraph PubSub["Публичная подсеть (ru-central1-a)"]
+            Bastion["🛡️ k3s-bastion<br/>(Jump Host + SSH Tunnel, preemptible)"]
+        end
+
+        subgraph PrivSub["Приватный контур (без публичных IP)"]
+
+            NLB["⚖️ Internal NLB<br/>(Ports 80 / 443)"]
+
+            subgraph Masters["Control Plane (3 зоны: a, d, e)"]
+                M1["k3s-master-1<br/>(API :6443 + etcd)"]
+                M2["k3s-master-2<br/>(API :6443 + etcd)"]
+                M3["k3s-master-3<br/>(API :6443 + etcd)"]
+            end
+
+            subgraph Workers["Worker Nodes (2 зоны: a, d)"]
+                Traefik["🔀 Traefik Ingress<br/>(NodePort 30360/31181)"]
+                Apps["🚀 Workloads + ArgoCD + Monitoring + Logging + ESO"]
+                Storage["💾 Longhorn Storage<br/>(RWO, 1–2 replicas)"]
+            end
+        end
+
+        Managed["🔐 Yandex Lockbox (ESO) & 📦 Object Storage S3 (Loki)"]
+    end
+
+    %% Связи для построения графа
+    Admin -->|"SSH :22 (bastion_sg)"| Bastion
+    Bastion -.->|"SSH Tunnel :6443"| Masters
+    Bastion -->|"HTTP/HTTPS :80/443"| NLB
+    NLB -->|"NodePort 30360/31181"| Traefik
+    Traefik --> Apps
+    Apps <--> Storage
+    Apps -.->|"Secrets & Logs"| Managed
+```
+## Компоненты
+
+### Инфраструктура (Terraform / OpenTofu)
+
+- **VPC** `k3s-network-${env}` — изолированная сеть (отдельная для dev и prod)
+- **Подсети:** (создаются динамически через `for_each` в зависимости от зон окружения)
+  - `k3s-public-buckets (10.200.1.0/24 для зоны a, 10.201.1.0/24 для зоны d)` — публичный контур для бастиона.
+  - `k3s-private-subnets (10.200.2.0/24 для зоны a, 10.202.2.0/24 для зоны d)` — для мастер-нод.
+  - `k3s-workers-subnets (10.200.3.0/24 для зоны a, 10.202.3.0/24 для зоны d)` — для воркер-нод.
+- **`NAT-шлюз`** — для выхода приватных нод в интернет.
+- **Security Groups:**
+ - `bastion_sg` (SSH только с admin_allowed_ips). (в tech-debt P1 описал решение для командной работы)
+ - `cluster_sg` (межнодовое общение, K8s API, NodePort Traefik).
+ - `nlb_sg` (трафик от внутреннего NLB к NodePort воркеров).
+
+### Кластер (Ansible + K3s)
+
+- **3 мастера** в 3 зонах (HA etcd-кворум).
+- **2 воркера** в 2 зонах.
+- **K3s** — легковесный Kubernetes.
+- **ArgoCD** — GitOps-оператор.
+- **Longhorn** — распределённое блочное хранилище (2 реплики).
+
+### Доступ
+
+- **SSH** — через бастион.
+- **Kubernetes API** — через SSH-туннель (127.0.0.1:6443).
+- **Публичного NLB нет** — сознательный компромисс (см. Trade-offs в README).
+
+## Стоимость
+
+- **~20-40 ₽ за 2 часа работы** (6 ВМ, прерываемые, 20% vCPU).
+- **~0 ₽/мес**, когда стенд не поднят (все ВМ удалены).
+
+---
 
 ## Рабочий процесс (Как ведется работа над проектом)
 
@@ -124,7 +203,8 @@ k3s-cloud-platform/
 │   ├── audit-backlog.md             # Конкретные технические недочеты (баги и мисконфиги), выявленные при аудите инфраструктуры.
 │   ├── production-gaps.md           # Пять столпов Production (Стратегический аудит)
 │   ├── slo.md                       # SLO/SLI для сервисов стенда
-│   └── tech-debt.md                 # Аудит: чек-лист задач
+│   ├── tech-debt.md                 # Аудит: чек-лист задач
+│   └── CHANGELOG.md                 # История изменений проекта
 ├── group_vars/
 │   └── all/
 │       ├── vars.yml                 # Переменные Ansible
@@ -169,7 +249,6 @@ k3s-cloud-platform/
 ├── tf-bootstrap/                    # Bootstrap: создание YDB для S3-бэкенда OpenTofu
 │   └── main.tf
 ├── ansible.cfg                      # Конфигурация Ansible
-├── CHANGELOG.md                     # История изменений проекта
 ├── Makefile                         # Скрипты автоматизации (make up, make down)
 └── README.md                        # Документация проекта
 ```
@@ -244,6 +323,11 @@ k3s-cloud-platform/
 
 ## 🎯 Что нужно доработать до уровня Production (Технический долг)
 
-Цель: сделать реальный Production-стенд
+Подробный разбор архитектуры, рисков и планов развития стенда вынесен в директорию `docs/`:
 
-👉 Подробный аудит читайте в [![tech-debt](./docs/tech-debt.md)](./docs/tech-debt.md)
+* **[Production Gaps (`docs/production-gaps.md`)](./docs/production-gaps.md)** — стратегический аудит стенда по пяти столпам Production.
+* **[Tech Debt (`docs/tech-debt.md`)](./docs/tech-debt.md)** — приоритизированный чек-лист технических доработок (P0–P3).
+* **[Audit Backlog (`docs/audit-backlog.md`)](./docs/audit-backlog.md)** — список выявленных мисконфигов и багов инфраструктуры.
+* **[Failure Modes (`docs/failure-modes.md`)](./docs/failure-modes.md)** — анализ сценариев отказа и деградации кластера.
+* **[SLO / SLI (`docs/slo.md`)](./docs/slo.md)** — целевые показатели надёжности сервисов платформы.
+* **[ADR-01 (`docs/multi-zonal-limitation.md`)](./docs/multi-zonal-limitation.md)** — архитектурное решение по зонам доступности и кворуму etcd.
