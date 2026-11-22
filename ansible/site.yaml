@@ -1,6 +1,6 @@
 ---
 # ==============================================================================
-# ЭТАП 1: Настройка локального окружения разработчика
+# ЭТАП 0: Настройка локального окружения
 # ==============================================================================
 - name: Настройка локального хоста
   hosts: localhost
@@ -10,14 +10,18 @@
     - local_env
 
 # ==============================================================================
-# ЭТАП 1.5: Установка K3s
+# ЭТАП 1.5: Инициализация первого мастера K3s (Production-way: get_url + SHA256)
 # ==============================================================================
-- name: Развертывание высокодоступного кластера K3s в Облаке
-  hosts: k3s_masters
+- name: Инициализация первого мастера K3s
+  hosts: k3s_masters[0]
   become: true
   gather_facts: false
+  vars:
+    k3s_version: "v1.37.2+k3s1"
+    k3s_binary_url: "https://github.com/k3s-io/k3s/releases/download/{{ k3s_version }}/k3s"
+    k3s_sha256_url: "https://github.com/k3s-io/k3s/releases/download/{{ k3s_version }}/sha256sum-amd64.txt"
   tasks:
-    - name: "SRE-Guard: Ожидаем полной готовности SSH-демона в ОС"
+    - name: "SRE-Guard: Ожидаем готовности SSH"
       ansible.builtin.wait_for:
         host: "{{ ansible_host | default(inventory_hostname) }}"
         port: 22
@@ -25,84 +29,141 @@
         delay: 5
         timeout: 120
 
-    - name: Включение сбора фактов после успешного подключения
+    - name: Сбор фактов
       ansible.builtin.setup:
 
-    - name: Проверяем, установлен ли K3s
-      ansible.builtin.stat:
-        path: /usr/local/bin/k3s
-      register: k3s_binary
-      when: inventory_hostname == groups['k3s_masters'][0]
-
-    - name: Инициализация первого мастера K3s
-      ansible.builtin.shell:
-        cmd: >
-          curl -sfL https://get.k3s.io | sh -s - server
-          --cluster-init
-          --node-ip={{ ansible_default_ipv4.address }}
-          --disable servicelb
-          --disable traefik
-      when:
-        - inventory_hostname == groups['k3s_masters'][0]
-        - not k3s_binary.stat.exists
-
-    - name: Ожидание генерации токена кластера на первом мастере
-      ansible.builtin.wait_for:
-        path: /var/lib/rancher/k3s/server/node-token
+    - name: Установка ca-certificates
+      ansible.builtin.apt:
+        name: ca-certificates
         state: present
-        timeout: 60
-      when: inventory_hostname == groups['k3s_masters'][0]
+        update_cache: yes
 
-    - name: Чтение сгенерированного токена с первого мастера
+    - name: Скачиваем файл с контрольной суммой SHA256
+      ansible.builtin.get_url:
+        url: "{{ k3s_sha256_url }}"
+        dest: /tmp/k3s.sha256
+        mode: '0644'
+
+    - name: Извлекаем хеш из файла
+      ansible.builtin.shell: grep ' k3s$' /tmp/k3s.sha256 | awk '{print $1}'
+      register: k3s_sha256_hash
+
+    - name: Скачиваем бинарник K3s с проверкой SHA256
+      ansible.builtin.get_url:
+        url: "{{ k3s_binary_url }}"
+        dest: /usr/local/bin/k3s
+        mode: "0755"
+        checksum: "sha256:{{ k3s_sha256_hash.stdout }}"
+
+    - name: Создаем симлинки для kubectl, crictl и ctr
+      ansible.builtin.file:
+        src: /usr/local/bin/k3s
+        dest: "/usr/local/bin/{{ item }}"
+        state: link
+      loop:
+        - kubectl
+        - crictl
+        - ctr
+
+    - name: Создаем директорию конфигурации K3s
+      ansible.builtin.file:
+        path: /etc/rancher/k3s
+        state: directory
+        mode: "0755"
+
+    - name: Генерируем /etc/rancher/k3s/config.yaml для первого мастера
+      ansible.builtin.copy:
+        dest: /etc/rancher/k3s/config.yaml
+        mode: "0600"
+        content: |
+          cluster-init: true
+          node-ip: {{ ansible_default_ipv4.address }}
+          tls-san:
+            - 127.0.0.1
+            - {{ ansible_default_ipv4.address }}
+          disable:
+            - servicelb
+            - traefik
+      notify: Restart k3s server
+
+    - name: Создаем systemd-юнит k3s.service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/k3s.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Lightweight Kubernetes
+          Documentation=https://k3s.io
+          Wants=network-online.target
+          After=network-online.target
+
+          [Install]
+          WantedBy=multi-user.target
+
+          [Service]
+          Type=notify
+          KillMode=process
+          Delegate=yes
+          LimitNOFILE=1048576
+          LimitNPROC=infinity
+          LimitCORE=infinity
+          TasksMax=infinity
+          TimeoutStartSec=0
+          Restart=always
+          RestartSec=5s
+          ExecStartPre=/sbin/modprobe br_netfilter
+          ExecStartPre=/sbin/modprobe overlay
+          ExecStart=/usr/local/bin/k3s server
+      notify: Restart k3s server
+
+    - name: Запускаем и включаем сервис k3s
+      ansible.builtin.systemd:
+        name: k3s
+        state: started
+        enabled: true
+        daemon_reload: true
+
+    - name: Ожидаем готовности Kubernetes API (порт 6443)
+      ansible.builtin.wait_for:
+        host: "{{ ansible_default_ipv4.address }}"
+        port: 6443
+        state: started
+        timeout: 120
+
+    - name: Считываем node-token с первого мастера
       ansible.builtin.slurp:
         src: /var/lib/rancher/k3s/server/node-token
-      register: k3s_node_token_encoded
-      when: inventory_hostname == groups['k3s_masters'][0]
+      register: k3s_node_token_raw
+      no_log: true
 
-    - name: Расшаривание токена на все хосты в памяти Ansible
+    - name: Сохраняем токен и IP первого мастера как факты
       ansible.builtin.set_fact:
-        k3s_cluster_token: "{{ hostvars[groups['k3s_masters'][0]]['k3s_node_token_encoded']['content'] | b64decode | trim }}"
-      when: hostvars[groups['k3s_masters'][0]]['k3s_node_token_encoded'] is defined
-      run_once: true
+        k3s_token: "{{ k3s_node_token_raw.content | b64decode | trim }}"
+        k3s_master_ip: "{{ ansible_default_ipv4.address }}"
+      no_log: true
 
-    - name: Ожидание запуска Kubernetes API на первом мастере
-      ansible.builtin.wait_for:
-        host: "{{ hostvars[groups['k3s_masters'][0]]['ansible_default_ipv4'].address }}"
-        port: 6443
-        delay: 5
-        timeout: 60
-        state: started
-      when: inventory_hostname != groups['k3s_masters'][0]
-
-    - name: Проверяем, установлен ли K3s на остальных мастерах
-      ansible.builtin.stat:
-        path: /usr/local/bin/k3s
-      register: k3s_binary_others
-      when: inventory_hostname != groups['k3s_masters'][0]
-
-    - name: Подключение остальных мастеров к кворуму кластера
-      ansible.builtin.shell:
-        cmd: >
-          curl -sfL https://get.k3s.io | sh -s - server
-          --server https://{{ hostvars[groups['k3s_masters'][0]]['ansible_default_ipv4'].address }}:6443
-          --node-ip={{ ansible_default_ipv4.address }}
-          --token={{ k3s_cluster_token }}
-          --disable servicelb
-          --disable traefik
-      when:
-        - inventory_hostname != groups['k3s_masters'][0]
-        - not k3s_binary_others.stat.exists
-      throttle: 1
+  handlers:
+    - name: Restart k3s server
+      ansible.builtin.systemd:
+        name: k3s
+        state: restarted
+        daemon_reload: true
 
 # ==============================================================================
-# ЭТАП 1.6: Подключение воркеров
+# ЭТАП 1.6: Подключение остальных мастеров (в dev автоматически пропустится)
 # ==============================================================================
-- name: Подключение воркеров к кластеру K3s
-  hosts: k3s_workers
+- name: Подключение дополнительных мастеров к HA-кластеру K3s
+  hosts: k3s_masters[1:]
   become: true
-  gather_facts: true
+  gather_facts: false
+  throttle: 1
+  vars:
+    k3s_version: "v1.30.4+k3s1"
+    k3s_binary_url: "https://github.com/k3s-io/k3s/releases/download/{{ k3s_version }}/k3s"
+    k3s_sha256_url: "https://github.com/k3s-io/k3s/releases/download/{{ k3s_version }}/sha256sum-amd64.txt"
+    first_master: "{{ groups['k3s_masters'][0] }}"
   tasks:
-    - name: Ожидание готовности SSH
+    - name: "SRE-Guard: Ожидаем готовности SSH"
       ansible.builtin.wait_for:
         host: "{{ ansible_host | default(inventory_hostname) }}"
         port: 22
@@ -110,27 +171,205 @@
         delay: 5
         timeout: 120
 
-    - name: Проверяем, установлен ли K3s на воркерах
-      ansible.builtin.stat:
-        path: /usr/local/bin/k3s
-      register: k3s_worker_binary
+    - name: Сбор фактов
+      ansible.builtin.setup:
 
-    - name: Чтение токена с первого мастера
-      ansible.builtin.slurp:
-        src: /var/lib/rancher/k3s/server/node-token
-      register: k3s_worker_token
-      delegate_to: "{{ groups['k3s_masters'][0] }}"
-      become: true
+    - name: Установка ca-certificates
+      ansible.builtin.apt:
+        name: ca-certificates
+        state: present
+        update_cache: yes
 
-    - name: Подключение воркеров к кластеру
-      ansible.builtin.shell:
-        cmd: >
-          curl -sfL https://get.k3s.io |
-          K3S_URL=https://{{ hostvars[groups['k3s_masters'][0]]['ansible_default_ipv4'].address }}:6443
-          K3S_TOKEN={{ k3s_worker_token['content'] | b64decode | trim }}
-          sh -
-      when: not k3s_worker_binary.stat.exists
-      throttle: 1
+    - name: Скачиваем файл с контрольной суммой SHA256
+      ansible.builtin.get_url:
+        url: "{{ k3s_sha256_url }}"
+        dest: /tmp/k3s.sha256
+        mode: '0644'
+
+    - name: Извлекаем хеш из файла
+      ansible.builtin.shell: grep ' k3s$' /tmp/k3s.sha256 | awk '{print $1}'
+      register: k3s_sha256_hash
+
+    - name: Скачиваем бинарник K3s с проверкой SHA256
+      ansible.builtin.get_url:
+        url: "{{ k3s_binary_url }}"
+        dest: /usr/local/bin/k3s
+        mode: "0755"
+        checksum: "sha256:{{ k3s_sha256_hash.stdout }}"
+
+    - name: Создаем симлинки для kubectl, crictl и ctr
+      ansible.builtin.file:
+        src: /usr/local/bin/k3s
+        dest: "/usr/local/bin/{{ item }}"
+        state: link
+      loop:
+        - kubectl
+        - crictl
+        - ctr
+
+    - name: Создаем директорию конфигурации K3s
+      ansible.builtin.file:
+        path: /etc/rancher/k3s
+        state: directory
+        mode: "0755"
+
+    - name: Генерируем /etc/rancher/k3s/config.yaml для дополнительного мастера
+      ansible.builtin.copy:
+        dest: /etc/rancher/k3s/config.yaml
+        mode: "0600"
+        no_log: true
+        content: |
+          server: https://{{ hostvars[first_master]['k3s_master_ip'] }}:6443
+          token: {{ hostvars[first_master]['k3s_token'] }}
+          node-ip: {{ ansible_default_ipv4.address }}
+          tls-san:
+            - 127.0.0.1
+            - {{ ansible_default_ipv4.address }}
+          disable:
+            - servicelb
+            - traefik
+
+    - name: Создаем systemd-юнит k3s.service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/k3s.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Lightweight Kubernetes
+          Documentation=https://k3s.io
+          Wants=network-online.target
+          After=network-online.target
+
+          [Install]
+          WantedBy=multi-user.target
+
+          [Service]
+          Type=notify
+          KillMode=process
+          Delegate=yes
+          LimitNOFILE=1048576
+          LimitNPROC=infinity
+          LimitCORE=infinity
+          TasksMax=infinity
+          TimeoutStartSec=0
+          Restart=always
+          RestartSec=5s
+          ExecStartPre=/sbin/modprobe br_netfilter
+          ExecStartPre=/sbin/modprobe overlay
+          ExecStart=/usr/local/bin/k3s server
+
+    - name: Запускаем и включаем сервис k3s
+      ansible.builtin.systemd:
+        name: k3s
+        state: started
+        enabled: true
+        daemon_reload: true
+
+    - name: Ожидаем готовности порта 6443 на подключенном мастере
+      ansible.builtin.wait_for:
+        host: "{{ ansible_default_ipv4.address }}"
+        port: 6443
+        state: started
+        timeout: 120
+
+# ==============================================================================
+# ЭТАП 1.7: Подключение воркер-нод (Agents)
+# ==============================================================================
+- name: Подключение воркер-нод к кластеру K3s
+  hosts: k3s_workers
+  become: true
+  gather_facts: false
+  vars:
+    k3s_version: "v1.30.4+k3s1"
+    k3s_binary_url: "https://github.com/k3s-io/k3s/releases/download/{{ k3s_version }}/k3s"
+    k3s_sha256_url: "https://github.com/k3s-io/k3s/releases/download/{{ k3s_version }}/sha256sum-amd64.txt"
+    first_master: "{{ groups['k3s_masters'][0] }}"
+  tasks:
+    - name: "SRE-Guard: Ожидаем готовности SSH"
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host | default(inventory_hostname) }}"
+        port: 22
+        state: started
+        delay: 5
+        timeout: 120
+
+    - name: Сбор фактов
+      ansible.builtin.setup:
+
+    - name: Установка ca-certificates
+      ansible.builtin.apt:
+        name: ca-certificates
+        state: present
+        update_cache: yes
+
+    - name: Скачиваем файл с контрольной суммой SHA256
+      ansible.builtin.get_url:
+        url: "{{ k3s_sha256_url }}"
+        dest: /tmp/k3s.sha256
+        mode: '0644'
+
+    - name: Извлекаем хеш из файла
+      ansible.builtin.shell: grep ' k3s$' /tmp/k3s.sha256 | awk '{print $1}'
+      register: k3s_sha256_hash
+
+    - name: Скачиваем бинарник K3s с проверкой SHA256
+      ansible.builtin.get_url:
+        url: "{{ k3s_binary_url }}"
+        dest: /usr/local/bin/k3s
+        mode: "0755"
+        checksum: "sha256:{{ k3s_sha256_hash.stdout }}"
+
+    - name: Создаем директорию конфигурации K3s
+      ansible.builtin.file:
+        path: /etc/rancher/k3s
+        state: directory
+        mode: "0755"
+
+    - name: Генерируем /etc/rancher/k3s/config.yaml для воркера
+      ansible.builtin.copy:
+        dest: /etc/rancher/k3s/config.yaml
+        mode: "0600"
+        no_log: true
+        content: |
+          server: https://{{ hostvars[first_master]['k3s_master_ip'] }}:6443
+          token: {{ hostvars[first_master]['k3s_token'] }}
+          node-ip: {{ ansible_default_ipv4.address }}
+
+    - name: Создаем systemd-юнит k3s-agent.service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/k3s-agent.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Lightweight Kubernetes Agent
+          Documentation=https://k3s.io
+          Wants=network-online.target
+          After=network-online.target
+
+          [Install]
+          WantedBy=multi-user.target
+
+          [Service]
+          Type=notify
+          KillMode=process
+          Delegate=yes
+          LimitNOFILE=1048576
+          LimitNPROC=infinity
+          LimitCORE=infinity
+          TasksMax=infinity
+          TimeoutStartSec=0
+          Restart=always
+          RestartSec=5s
+          ExecStartPre=/sbin/modprobe br_netfilter
+          ExecStartPre=/sbin/modprobe overlay
+          ExecStart=/usr/local/bin/k3s agent
+
+    - name: Запускаем и включаем сервис k3s-agent
+      ansible.builtin.systemd:
+        name: k3s-agent
+        state: started
+        enabled: true
+        daemon_reload: true
 
 # ==============================================================================
 # ЭТАП 2: Kubeconfig
@@ -180,7 +419,6 @@
       retries: 30
       delay: 10
 
-    # ---- Сначала готовим ESO-инфраструктуру, потом Root App ----
     - name: Создание namespace для ESO
       kubernetes.core.k8s:
         kubeconfig: "{{ playbook_dir }}/../.kube/config"
