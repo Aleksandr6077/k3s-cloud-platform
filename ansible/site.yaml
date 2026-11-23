@@ -158,7 +158,7 @@
   gather_facts: false
   throttle: 1
   vars:
-    k3s_version: "v1.30.4+k3s1"
+    k3s_version: "v1.37.2+k3s1"
     k3s_binary_url: "https://github.com/k3s-io/k3s/releases/download/{{ k3s_version }}/k3s"
     k3s_sha256_url: "https://github.com/k3s-io/k3s/releases/download/{{ k3s_version }}/sha256sum-amd64.txt"
     first_master: "{{ groups['k3s_masters'][0] }}"
@@ -217,7 +217,6 @@
       ansible.builtin.copy:
         dest: /etc/rancher/k3s/config.yaml
         mode: "0600"
-        no_log: true
         content: |
           server: https://{{ hostvars[first_master]['k3s_master_ip'] }}:6443
           token: {{ hostvars[first_master]['k3s_token'] }}
@@ -228,7 +227,7 @@
           disable:
             - servicelb
             - traefik
-
+      no_log: true
     - name: Создаем systemd-юнит k3s.service
       ansible.builtin.copy:
         dest: /etc/systemd/system/k3s.service
@@ -280,7 +279,7 @@
   become: true
   gather_facts: false
   vars:
-    k3s_version: "v1.30.4+k3s1"
+    k3s_version: "v1.37.2+k3s1"
     k3s_binary_url: "https://github.com/k3s-io/k3s/releases/download/{{ k3s_version }}/k3s"
     k3s_sha256_url: "https://github.com/k3s-io/k3s/releases/download/{{ k3s_version }}/sha256sum-amd64.txt"
     first_master: "{{ groups['k3s_masters'][0] }}"
@@ -329,11 +328,11 @@
       ansible.builtin.copy:
         dest: /etc/rancher/k3s/config.yaml
         mode: "0600"
-        no_log: true
         content: |
           server: https://{{ hostvars[first_master]['k3s_master_ip'] }}:6443
           token: {{ hostvars[first_master]['k3s_token'] }}
           node-ip: {{ ansible_default_ipv4.address }}
+      no_log: true
 
     - name: Создаем systemd-юнит k3s-agent.service
       ansible.builtin.copy:

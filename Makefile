@@ -113,6 +113,19 @@ list:
 	cd $(TOFU_DIR) && TF_VAR_yc_token=$$(yc iam create-token) tofu state list
 	@echo "$(GREEN)====> Инициализация успешно завершена! <====$(NC)"
 
+## bastion-taint: Пометить бастион на пересоздание при следующем apply
+bastion-taint:
+	@echo "$(YELLOW)Помечаем bastion на пересоздание...$(NC)"
+	cd $(TOFU_DIR) && TF_VAR_yc_token=$$(yc iam create-token) tofu taint yandex_compute_instance.bastion
+	@echo "$(GREEN)====> Готово! Теперь запусти make up ENV=dev <====$(NC)"
+
+## bastion-recreate: Пересоздать бастион и применить изменения
+bastion-recreate:
+	@echo "$(RED)Пересоздаем bastion...$(NC)"
+	cd $(TOFU_DIR) && TF_VAR_yc_token=$$(yc iam create-token) tofu taint yandex_compute_instance.bastion
+	cd $(TOFU_DIR) && TF_VAR_yc_token=$$(yc iam create-token) tofu apply -var-file=$(VAR_FILE) -parallelism=1 -auto-approve
+	@echo "$(GREEN)====> Bastion успешно пересоздан! <====$(NC)"
+
 ## down-safe: Удалить всё, кроме S3-бакета Loki и его ключей
 down-safe: workspace-setup
 	@echo "$(RED)Удаление стенда [$(ENV)] с сохранением бакета Loki...$(NC)"

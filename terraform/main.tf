@@ -94,10 +94,10 @@ resource "yandex_vpc_security_group" "bastion_sg" {
   description = "Правила фильтрации трафика строго для Bastion-хоста"
   network_id  = yandex_vpc_network.k3s_network.id
 
-  # Входящий SSH на Бастион из внешнего мира (Только твой домашний IP)
+  # Входящий SSH на Бастион из внешнего мира (Только домашний IP)
   ingress {
     protocol       = "TCP"
-    description    = "Разрешить SSH на Bastion извне (только для админа)"
+    description    = "Разрешить SSH на Bastion извне"
     v4_cidr_blocks = var.admin_allowed_ips
     port           = 22
   }
