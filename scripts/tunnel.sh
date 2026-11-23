@@ -35,9 +35,9 @@ if [ "$FORCE_RECREATE" -eq 0 ] && ss -tlnp 2>/dev/null | grep -q ":6443 "; then
 fi
 
 # Парсим IP бастиона, мастеров и внутренний IP NLB
-BASTION_IP=$(grep "^k3s-bastion " "$HOSTS_FILE" | sed 's/.*ansible_host=\([^ ]*\).*/\1/')
-MASTER_IPS=$(grep "^k3s-master-" "$HOSTS_FILE" | sed 's/.*ansible_host=\([^ ]*\).*/\1/')
-NLB_INTERNAL_IP=$(grep "^k3s_ingress_nlb_ip " "$HOSTS_FILE" | sed 's/.*ansible_host=\([^ ]*\).*/\1/')
+BASTION_IP=$(grep "^k3s-bastion " "$HOSTS_FILE" | sed 's/.*ansible_host=\([^ ]*\).*/\1/' || true)
+MASTER_IPS=$(grep "^k3s-master-" "$HOSTS_FILE" | sed 's/.*ansible_host=\([^ ]*\).*/\1/' || true)
+NLB_INTERNAL_IP=$(grep "^k3s_ingress_nlb_ip " "$HOSTS_FILE" | sed 's/.*ansible_host=\([^ ]*\).*/\1/' || true)
 
 if [ -z "$BASTION_IP" ]; then
     echo "❌ Не удалось найти bastion в $HOSTS_FILE"
@@ -84,7 +84,7 @@ for MASTER_IP in $MASTER_IPS; do
         -f -N \
         -J "ubuntu@$BASTION_IP" \
         $LOCAL_FORWARD \
-        "ubuntu@$MASTER_IP"" 2>/dev/null || {
+        "ubuntu@$MASTER_IP"" || {
             echo "  ✗ master $MASTER_IP недоступен"
             continue
         }
