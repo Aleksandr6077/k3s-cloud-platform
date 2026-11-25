@@ -26,6 +26,7 @@ spec:
     server: 'https://kubernetes.default.svc'
     namespace: longhorn-system # Автоматический деплой в изолированный namespace
     ignoreDifferences:
+    # Игнорируем TLS-сертификат (caBundle), который контроллер Longhorn сам дописывает в вебхуки
     - group: admissionregistration.k8s.io
       kind: ValidatingWebhookConfiguration
       jqPathExpressions:
@@ -34,11 +35,18 @@ spec:
       kind: MutatingWebhookConfiguration
       jqPathExpressions:
         - '.webhooks[]?.clientConfig.caBundle'
+    # ДОБАВЛЕНО: игнорируем TLS-сертификат (caBundle), который longhorn-manager вписывает в 7 своих CRD при старте
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+      jqPathExpressions:
+        - '.spec.conversion.webhook.clientConfig.caBundle'
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+      # Включает применение правил ignoreDifferences при синхронизации
       - RespectIgnoreDifferences=true
-      - ServerSideApply=true   # решает проблему OutOfSync у больших CRD и ресурсов Longhorn
+      # Использует Server-Side Apply для корректной работы с большими CRD Longhorn
+      - ServerSideApply=true
