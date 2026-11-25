@@ -1,10 +1,6 @@
 # ==============================================================================
-# Loki — SingleBinary mode для эфемерного стенда
-# Чарт: grafana/loki
-# Docs: https://grafana.com/docs/loki/latest/setup/install/helm/install-monolithic/
-# ==============================================================================
-
-deploymentMode: SimpleScalable
+# Loki — SingleBinary mode для эфемерного dev-стенда (весь Loki в 1 поде вместо 11, чтобы не душить 2 ноды в dev)
+deploymentMode: SingleBinary
 
 loki:
   auth_enabled: false
@@ -17,10 +13,12 @@ loki:
     bucketNames:
       chunks: "${LOKI_BUCKET}"
       ruler: "${LOKI_BUCKET}"
+      admin: "${LOKI_BUCKET}"
     s3:
       endpoint: "storage.yandexcloud.net"
       region: "ru-central1"
       s3ForcePathStyle: true
+      insecure: false
 
   schemaConfig:
     configs:
@@ -32,6 +30,18 @@ loki:
         store: tsdb
         schema: v13
 
+  limits_config:
+    retention_period: 168h
+    reject_old_samples: true
+    reject_old_samples_max_age: 168h
+
+  compactor:
+    working_directory: /var/loki/compactor
+    compaction_interval: 10m
+    retention_enabled: true
+    retention_delete_delay: 2h
+    delete_request_store: s3
+
   # Подтягиваем переменные окружения из нашего Secret
   extraEnvFrom:
     - secretRef:
@@ -41,24 +51,46 @@ loki:
 minio:
   enabled: false
 
-# Настройки компонентов SimpleScalable
-write:
-  replicas: 2
+# конфигурация единственного пода Loki в режиме SingleBinary
+singleBinary:
+  replicas: 1
+  # заставляет Loki подставить реальное имя бакета вместо "${LOKI_BUCKET}" из секрета
+  extraArgs:
+    - -config.expand-env=true
+  # монтирует ключи S3 и имя бакета из K8s Secret, созданного ESO
+  extraEnvFrom:
+    - secretRef:
+        name: loki-s3-credentials
   persistence:
-    storageClass: "longhorn"
-    size: 10Gi
-read:
-  replicas: 2
-backend:
-  replicas: 2
-  persistence:
-    storageClass: "longhorn"
-    size: 10Gi
-
-gateway:
-  enabled: true
-chunksCache:
+    enabled: true
+    storageClass: longhorn
+    size: 5Gi
   resources:
     requests:
-      memory: 256Mi
       cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# явно обнуляем реплики микросервисов SimpleScalable, чтобы чарт их не создавал
+read:
+  replicas: 0
+write:
+  replicas: 0
+backend:
+  replicas: 0
+
+# лёгкий nginx-шлюз, чтобы не менять URL в values-alloy.yaml
+gateway:
+  enabled: true
+
+# отключаем тяжёлые memcached-кэши и canary, они съедали ~1.5 ГБ RAM и CPU в dev
+chunksCache:
+  enabled: false
+resultsCache:
+  enabled: false
+lokiCanary:
+  enabled: false
+test:
+  enabled: false
