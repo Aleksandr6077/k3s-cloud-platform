@@ -16,8 +16,7 @@ spec:
     targetRevision: 1.5.0
     helm:
       valueFiles:
-        - values-alloy.yaml
-      # См. комментарий в loki-app.yaml про multi-source.
+        - $values/k8s/platform/logging/values-alloy.yaml
 
   destination:
     server: https://kubernetes.default.svc
