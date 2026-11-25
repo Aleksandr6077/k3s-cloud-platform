@@ -28,3 +28,4 @@ terraform.tfvars
 .terraform.lock.hcl
 .yc-token.kube/
 ansible/eso_key.json
+argocd-apps-healthy.png
