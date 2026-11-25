@@ -25,7 +25,7 @@ spec:
   destination:
     server: 'https://kubernetes.default.svc'
     namespace: longhorn-system # Автоматический деплой в изолированный namespace
-    ignoreDifferences:
+  ignoreDifferences:
     # Игнорируем TLS-сертификат (caBundle), который контроллер Longhorn сам дописывает в вебхуки
     - group: admissionregistration.k8s.io
       kind: ValidatingWebhookConfiguration
