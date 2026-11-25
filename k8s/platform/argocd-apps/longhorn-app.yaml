@@ -40,3 +40,5 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+      - RespectIgnoreDifferences=true
+      - ServerSideApply=true   # решает проблему OutOfSync у больших CRD и ресурсов Longhorn
