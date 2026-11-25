@@ -42,7 +42,7 @@
       ansible.builtin.get_url:
         url: "{{ k3s_sha256_url }}"
         dest: /tmp/k3s.sha256
-        mode: '0644'
+        mode: "0644"
 
     - name: Извлекаем хеш из файла
       ansible.builtin.shell: grep ' k3s$' /tmp/k3s.sha256 | awk '{print $1}'
@@ -184,7 +184,7 @@
       ansible.builtin.get_url:
         url: "{{ k3s_sha256_url }}"
         dest: /tmp/k3s.sha256
-        mode: '0644'
+        mode: "0644"
 
     - name: Извлекаем хеш из файла
       ansible.builtin.shell: grep ' k3s$' /tmp/k3s.sha256 | awk '{print $1}'
@@ -305,7 +305,7 @@
       ansible.builtin.get_url:
         url: "{{ k3s_sha256_url }}"
         dest: /tmp/k3s.sha256
-        mode: '0644'
+        mode: "0644"
 
     - name: Извлекаем хеш из файла
       ansible.builtin.shell: grep ' k3s$' /tmp/k3s.sha256 | awk '{print $1}'
@@ -406,6 +406,24 @@
         apply: true
         server_side_apply:
           field_manager: ansible
+
+    # убирает вечный статус Progressing у Ingress в ArgoCD,
+    - name: Настройка health-check для Ingress в ArgoCD
+      kubernetes.core.k8s:
+        kubeconfig: "{{ playbook_dir }}/../.kube/config"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: argocd-cm
+            namespace: argocd
+          data:
+            resource.customizations.health.networking.k8s.io_Ingress: |
+              hs = {}
+              hs.status = "Healthy"
+              hs.message = "Ingress configured"
+              return hs
 
     - name: Ожидание полной готовности ArgoCD Server
       kubernetes.core.k8s_info:
