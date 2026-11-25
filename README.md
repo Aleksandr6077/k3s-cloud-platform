@@ -156,7 +156,7 @@ K3s использует встроенный в бинарник движок `
 * **GitOps**: ArgoCD (паттерн App of Apps).
 * **Секреты**: Yandex Lockbox + External Secrets Operator (ESO). Секреты не хранятся в Git, ESO забирает их из облака и создает K8s Secrets на лету.
 * **Мониторинг**: Prometheus + Grafana (установка через Helm).
-* **Логирование**: Grafana Loki (Distributed, хранение чанков в S3 Yandex Object Storage) + Alloy.
+* **Логирование**: Grafana Loki (SingleBinary для dev / SimpleScalable для prod + хранение чанков в S3 Yandex Object Storage) + Alloy.
 * **Эфемерный стенд и S3**: Бакет Object Storage для Loki живет отдельно от стенда и **не удаляется** при `make down`.
 
 ### Сетевая архитектура
@@ -296,10 +296,12 @@ k3s-cloud-platform/
 - `k8s/platform/argocd-apps/` — манифесты Application.
 - `k8s/platform/traefik-config.yaml` — HelmChartConfig.
 
+![Состояние приложений в ArgoCD](./docs/images/argocd-apps-healthy.png)
+
 ### 4. Мониторинг и Секреты
 
  - Стек kube-prometheus-stack ставится через ArgoCD.
-  - Безопасность учётных данных: Все чувствительные данные (пароль Grafana, Telegram-токены, S3 ключи) хранятся в Yandex Lockbox и подтягиваются в кластер через External Secrets Operator (ESO). В Git хранятся только ID секретов.
+  - Безопасность учётных данных: Все чувствительные данные (пароль Grafana, Telegram-токены, S3 ключи) хранятся в Yandex Lockbox и подтягиваются в кластер через External Secrets Operator (ESO). В Git хранятся только имена секретов (поиск по имени в Yandex Lockbox через ESO).
  - Alert rules: `NodeDown, PodCrashLooping, HighCPU`.
 
 
